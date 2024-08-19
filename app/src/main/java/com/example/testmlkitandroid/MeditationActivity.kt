@@ -10,7 +10,6 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -22,7 +21,7 @@ import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.util.concurrent.Executors
 
-class meditationActivity : AppCompatActivity() {
+class MeditationActivity : AppCompatActivity() {
 
     // Khai báo các biến cần thiết cho PreviewView, nút bắt đầu và quản lý quyền
     private lateinit var previewView: PreviewView
@@ -110,9 +109,9 @@ class meditationActivity : AppCompatActivity() {
             if (mediaImage != null) {
                 val inputImage = InputImage.fromMediaImage(mediaImage, image.imageInfo.rotationDegrees)
 
-                // Lấy kích thước thực tế của hình ảnh từ camera
-                val imageWidth = mediaImage.width
-                val imageHeight = mediaImage.height
+                // Lấy kích thước thực tế của hình ảnh từ camera (reverse width and height)
+                val imageWidth = mediaImage.height
+                val imageHeight = mediaImage.width
 
                 faceDetector.process(inputImage)
                     .addOnSuccessListener { faces ->
@@ -126,17 +125,21 @@ class meditationActivity : AppCompatActivity() {
                                 val scaleX = overlayView.width.toFloat() / imageWidth
                                 val scaleY = overlayView.height.toFloat() / imageHeight
 
-                                // Mở rộng bounding box một chút (ví dụ: 5%)
-                                val expansionFactor = 0.05f
-                                val expandedLeft = boundingBox.left - (boundingBox.width() * expansionFactor / 2)
-                                val expandedTop = boundingBox.top - (boundingBox.height() * expansionFactor / 2)
-                                val expandedRight = boundingBox.right + (boundingBox.width() * expansionFactor / 2)
-                                val expandedBottom = boundingBox.bottom + (boundingBox.height() * expansionFactor / 2)
+
+                                // Mở rộng bên trái và bên phải, thu hẹp phần trên và dưới (ví dụ: 70% ngang và 3% dọc)
+                                val horizontalExpansion = 0.7f
+                                val verticalShrinkage = 0.03f
+
+                                val expandedLeft = boundingBox.left - (boundingBox.width() * horizontalExpansion / 2)
+                                val expandedTop = boundingBox.top + (boundingBox.height() * verticalShrinkage / 2)
+                                val expandedRight = boundingBox.right + (boundingBox.width() * horizontalExpansion / 2)
+                                val expandedBottom = boundingBox.bottom - (boundingBox.height() * verticalShrinkage / 2)
 
                                 // Nếu đang sử dụng camera trước, lật bounding box theo chiều ngang
                                 val mirroredLeft = if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA)
                                     (imageWidth - expandedRight) * scaleX
                                 else expandedLeft * scaleX
+
                                 val mirroredRight = if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA)
                                     (imageWidth - expandedLeft) * scaleX
                                 else expandedRight * scaleX
@@ -149,15 +152,15 @@ class meditationActivity : AppCompatActivity() {
                                 )
                             }
                             overlayView.updateBoxes(boundingBoxes)
-                            Toast.makeText(this@meditationActivity, "Detected ${faces.size} face(s)", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MeditationActivity, "Detected ${faces.size} face(s)", Toast.LENGTH_SHORT).show()
                         } else {
                             overlayView.setBoxColor(android.graphics.Color.RED)
-                            Toast.makeText(this@meditationActivity, "No faces detected", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MeditationActivity, "No faces detected", Toast.LENGTH_SHORT).show()
                         }
                     }
                     .addOnFailureListener { _ ->
                         overlayView.setBoxColor(android.graphics.Color.RED)  // Đổi lại màu đỏ khi thất bại
-                        Toast.makeText(this@meditationActivity, "Face detection failed", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MeditationActivity, "Face detection failed", Toast.LENGTH_SHORT).show()
                     }
                     .addOnCompleteListener {
                         image.close()

@@ -4,13 +4,13 @@
     xmlns:camera="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context=".meditationActivity">
+    tools:context=".MeditationActivity">
 
     <!-- PreviewView để hiển thị luồng camera -->
     <androidx.camera.view.PreviewView
         android:id="@+id/viewFinder"
-        android:layout_width="300dp"
-        android:layout_height="250dp"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:layout_alignParentTop="true"
         android:layout_alignParentBottom="true" />
 

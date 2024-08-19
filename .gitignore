@@ -1,15 +1,19 @@
+# IntelliJ IDEA project files
 *.iml
 .gradle
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+/.idea/
+
+# macOS system files
 .DS_Store
+
+# Gradle build output
 /build
+
+# Android Studio generated files
 /captures
 .externalNativeBuild
 .cxx
+
+# Local configuration
 local.properties
