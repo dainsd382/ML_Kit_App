@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "TestMlkitAndroid"
+rootProject.name = "ML_Kit_App"
 include(":app")
  

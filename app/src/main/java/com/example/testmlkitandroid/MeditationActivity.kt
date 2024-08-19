@@ -23,156 +23,185 @@ import java.util.concurrent.Executors
 
 class MeditationActivity : AppCompatActivity() {
 
-    // Khai báo các biến cần thiết cho PreviewView, nút bắt đầu và quản lý quyền
+    // Declare UI components and permission launcher
     private lateinit var previewView: PreviewView
     private lateinit var startButton: Button
     private lateinit var permissionLauncher: ActivityResultLauncher<String>
 
-    // Executor để xử lý ảnh trên một luồng riêng
+    // Executor for processing images on a separate thread
     private val cameraExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_meditation)
 
-        // Khởi tạo các view và biến
+        // Initialize the UI components
         previewView = findViewById(R.id.viewFinder)
         startButton = findViewById(R.id.recordButton)
 
-        // Đăng ký launcher để yêu cầu quyền truy cập camera
-        permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
+        // Register a launcher for requesting camera permission from the user
+        permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
             if (isGranted) {
+                // Start the camera if permission is granted
                 startCamera()
             } else {
-                Toast.makeText(this, "Camera permission denied", Toast.LENGTH_SHORT).show()
+                // Show a message if the permission is denied
+                showToast("Camera permission denied")
             }
         }
 
-        // Kiểm tra quyền truy cập camera và bắt đầu camera nếu đã được cấp quyền
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+        // Check if the camera permission is already granted
+        if (isCameraPermissionGranted()) {
+            // Start the camera if permission is already granted
             startCamera()
         } else {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
+            // Request camera permission if not granted
+            requestCameraPermission()
         }
 
-        // Xử lý sự kiện click cho nút bắt đầu
+        // Set up a click listener for the start button
         startButton.setOnClickListener {
-            // Code để bắt đầu phát hiện khuôn mặt hoặc chức năng khác
-            Toast.makeText(this, "Button clicked", Toast.LENGTH_SHORT).show()
+            // Display a simple toast message when the button is clicked
+            showToast("Button clicked")
         }
     }
 
+    // Method to check if camera permission is granted
+    private fun isCameraPermissionGranted(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    // Method to request camera permission from the user
+    private fun requestCameraPermission() {
+        permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    // Method to start the camera and set up the preview and analysis use cases
     private fun startCamera() {
-        // Lấy ProcessCameraProvider để quản lý các camera
+        // Get an instance of the ProcessCameraProvider to manage the camera lifecycle
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
-            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+            // Retrieve the camera provider instance
+            val cameraProvider = cameraProviderFuture.get()
 
-            // Cấu hình preview để hiển thị hình ảnh từ camera
+            // Configure the preview to display the camera feed on the PreviewView
             val preview = androidx.camera.core.Preview.Builder().build().apply {
                 setSurfaceProvider(previewView.surfaceProvider)
             }
 
-            // Cấu hình phân tích ảnh để phát hiện khuôn mặt
+            // Configure image analysis to process images for face detection
             val imageAnalysis = ImageAnalysis.Builder()
-                .setTargetRotation(previewView.display.rotation)
+                .setTargetRotation(previewView.display.rotation) // Set the target rotation to match the display orientation
                 .build()
                 .apply {
+                    // Set up the face analyzer to process images and overlay bounding boxes
                     val overlayView = findViewById<OverlayView>(R.id.overlay)
                     setAnalyzer(cameraExecutor, FaceAnalyzer(overlayView, CameraSelector.DEFAULT_FRONT_CAMERA))
                 }
 
-            // Chọn camera trước
+            // Select the front camera for analysis
             val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
 
-            // Ràng buộc lifecycle với camera và các use case (preview và phân tích ảnh)
+            // Bind the camera lifecycle with the preview and analysis use cases
             cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis)
         }, ContextCompat.getMainExecutor(this))
     }
 
+    // Utility method to display a toast message
+    private fun showToast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    // Inner class for analyzing images and detecting faces
     @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
     private inner class FaceAnalyzer(
         private val overlayView: OverlayView,
         private val cameraSelector: CameraSelector
     ) : ImageAnalysis.Analyzer {
+
+        // Initialize the face detector with specified options for accuracy, landmarks, and classification
         private val faceDetector: FaceDetector by lazy {
-            val options = FaceDetectorOptions.Builder()
-                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)  // Chế độ hiệu suất chính xác nhất
-                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)  // Phát hiện tất cả các landmarks trên khuôn mặt
-                .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)  // Chế độ phân loại tất cả
-                .build()
-            FaceDetection.getClient(options)
+            FaceDetection.getClient(
+                FaceDetectorOptions.Builder()
+                    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE) // Accurate mode for better detection results
+                    .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL) // Detect all facial landmarks
+                    .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL) // Enable all classification modes (e.g., smiling, eyes open)
+                    .build()
+            )
         }
 
+        // Method called for each image frame analyzed by the ImageAnalysis use case
         override fun analyze(image: ImageProxy) {
-            val mediaImage = image.image
-            if (mediaImage != null) {
-                val inputImage = InputImage.fromMediaImage(mediaImage, image.imageInfo.rotationDegrees)
-
-                // Lấy kích thước thực tế của hình ảnh từ camera (reverse width and height)
-                val imageWidth = mediaImage.height
-                val imageHeight = mediaImage.width
-
-                faceDetector.process(inputImage)
-                    .addOnSuccessListener { faces ->
-                        if (faces.isNotEmpty()) {
-                            overlayView.setBoxColor(android.graphics.Color.GREEN)
-
-                            val boundingBoxes = faces.map { face ->
-                                val boundingBox = face.boundingBox
-
-                                // Tính toán tỷ lệ giữa kích thước ảnh gốc và kích thước PreviewView
-                                val scaleX = overlayView.width.toFloat() / imageWidth
-                                val scaleY = overlayView.height.toFloat() / imageHeight
-
-
-                                // Mở rộng bên trái và bên phải, thu hẹp phần trên và dưới (ví dụ: 70% ngang và 3% dọc)
-                                val horizontalExpansion = 0.7f
-                                val verticalShrinkage = 0.03f
-
-                                val expandedLeft = boundingBox.left - (boundingBox.width() * horizontalExpansion / 2)
-                                val expandedTop = boundingBox.top + (boundingBox.height() * verticalShrinkage / 2)
-                                val expandedRight = boundingBox.right + (boundingBox.width() * horizontalExpansion / 2)
-                                val expandedBottom = boundingBox.bottom - (boundingBox.height() * verticalShrinkage / 2)
-
-                                // Nếu đang sử dụng camera trước, lật bounding box theo chiều ngang
-                                val mirroredLeft = if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA)
-                                    (imageWidth - expandedRight) * scaleX
-                                else expandedLeft * scaleX
-
-                                val mirroredRight = if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA)
-                                    (imageWidth - expandedLeft) * scaleX
-                                else expandedRight * scaleX
-
-                                RectF(
-                                    mirroredLeft,
-                                    expandedTop * scaleY,
-                                    mirroredRight,
-                                    expandedBottom * scaleY
-                                )
-                            }
-                            overlayView.updateBoxes(boundingBoxes)
-                            Toast.makeText(this@MeditationActivity, "Detected ${faces.size} face(s)", Toast.LENGTH_SHORT).show()
-                        } else {
-                            overlayView.setBoxColor(android.graphics.Color.RED)
-                            Toast.makeText(this@MeditationActivity, "No faces detected", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                    .addOnFailureListener { _ ->
-                        overlayView.setBoxColor(android.graphics.Color.RED)  // Đổi lại màu đỏ khi thất bại
-                        Toast.makeText(this@MeditationActivity, "Face detection failed", Toast.LENGTH_SHORT).show()
-                    }
-                    .addOnCompleteListener {
-                        image.close()
-                    }
-            } else {
-                image.close() // Đảm bảo rằng hình ảnh được đóng nếu null để tránh rò rỉ bộ nhớ
+            // Get the media image from the ImageProxy
+            val mediaImage = image.image ?: run {
+                // Close the image and return if mediaImage is null to avoid memory leaks
+                image.close()
+                return
             }
+
+            // Convert the media image to an InputImage for ML Kit processing
+            val inputImage = InputImage.fromMediaImage(mediaImage, image.imageInfo.rotationDegrees)
+
+            // Get the actual size of the image from the camera (width and height are swapped)
+            val imageWidth = mediaImage.height
+            val imageHeight = mediaImage.width
+
+            // Process the image to detect faces
+            faceDetector.process(inputImage)
+                .addOnSuccessListener { faces ->
+                    // Map detected faces to bounding boxes adjusted for screen size and camera orientation
+                    val boundingBoxes = faces.map { face ->
+                        val boundingBox = face.boundingBox
+                        calculateBoundingBox(boundingBox, imageWidth, imageHeight)
+                    }
+
+                    // Update the overlay view based on detection results
+                    overlayView.setBoxColor(if (faces.isNotEmpty()) android.graphics.Color.GREEN else android.graphics.Color.RED)
+                    overlayView.updateBoxes(boundingBoxes)
+
+                    // Show a toast with the number of detected faces
+                    showToast("Detected ${faces.size} face(s)")
+                }
+                .addOnFailureListener {
+                    // Handle face detection failure and update the overlay view
+                    overlayView.setBoxColor(android.graphics.Color.RED)
+                    showToast("Face detection failed")
+                }
+                .addOnCompleteListener {
+                    // Close the image after processing to free up resources
+                    image.close()
+                }
+        }
+
+        // Calculate the bounding box for a face, adjusting for camera orientation and preview size
+        private fun calculateBoundingBox(boundingBox: android.graphics.Rect, imageWidth: Int, imageHeight: Int): RectF {
+            // Calculate the scale factors between the original image size and the PreviewView size
+            val scaleX = overlayView.width.toFloat() / imageWidth
+            val scaleY = overlayView.height.toFloat() / imageHeight
+
+            // Adjust bounding box dimensions (expand horizontally and shrink vertically)
+            val expandedLeft = boundingBox.left - (boundingBox.width() * 0.35f)
+            val expandedTop = boundingBox.top + (boundingBox.height() * 0.015f)
+            val expandedRight = boundingBox.right + (boundingBox.width() * 0.35f)
+            val expandedBottom = boundingBox.bottom - (boundingBox.height() * 0.015f)
+
+            // Mirror the bounding box horizontally if using the front camera
+            val mirroredLeft = if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA)
+                (imageWidth - expandedRight) * scaleX
+            else expandedLeft * scaleX
+
+            val mirroredRight = if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA)
+                (imageWidth - expandedLeft) * scaleX
+            else expandedRight * scaleX
+
+            // Return the calculated bounding box as a RectF object
+            return RectF(mirroredLeft, expandedTop * scaleY, mirroredRight, expandedBottom * scaleY)
         }
     }
 
+    // Override onDestroy to clean up resources when the activity is destroyed
     override fun onDestroy() {
         super.onDestroy()
-        cameraExecutor.shutdown() // Đóng executor khi activity bị hủy
+        // Shut down the camera executor to avoid memory leaks
+        cameraExecutor.shutdown()
     }
 }
