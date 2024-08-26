@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.RectF
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
@@ -84,9 +85,14 @@ class MeditationActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    private var currentToast: Toast? = null
+
     private fun showToast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        currentToast?.cancel() // Cancel the previous toast if any
+        currentToast = Toast.makeText(this, message, Toast.LENGTH_SHORT)
+        currentToast?.show()
     }
+
 
     @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
     private inner class FaceAnalyzer(
@@ -94,18 +100,24 @@ class MeditationActivity : AppCompatActivity() {
         private val cameraSelector: CameraSelector
     ) : ImageAnalysis.Analyzer {
 
+        // Lazy initialization of the FaceDetector with performance mode set to FAST
         private val faceDetector: FaceDetector by lazy {
             FaceDetection.getClient(
                 FaceDetectorOptions.Builder()
+                    // Prioritizes accuracy over speed
                     .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
-                    .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
-                    .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
+                    // Prioritizes speed over accuracy
+                    // .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
                     .build()
             )
         }
 
+        // Factors to expand and shrink the bounding box for better visualization
         private val expandFactor = 0.35f
         private val shrinkFactor = 0.015f
+
+        // Variable to store the last detected number of faces
+        private var lastDetectedFaces = -1
 
         override fun analyze(image: ImageProxy) {
             val mediaImage = image.image ?: run {
@@ -127,8 +139,22 @@ class MeditationActivity : AppCompatActivity() {
 
                         overlayView.setBoxColor(android.graphics.Color.GREEN)
                         overlayView.updateBoxes(boundingBoxes)
+
+                        // Display a toast message only if the number of faces has changed
+                        if (faces.size != lastDetectedFaces) {
+                            showToast("Detected ${faces.size} face(s)")
+                            lastDetectedFaces = faces.size
+                        }
                     } else {
                         overlayView.setBoxColor(android.graphics.Color.RED)
+                        // Clear bounding boxes when no faces are detected
+                        overlayView.updateBoxes(emptyList())
+
+                        // Display a toast message only if the number of faces has changed
+                        if (0 != lastDetectedFaces) {
+                            showToast("Detected 0 face(s)")
+                            lastDetectedFaces = 0
+                        }
                     }
                 }
                 .addOnFailureListener {
@@ -153,6 +179,12 @@ class MeditationActivity : AppCompatActivity() {
                 (imageWidth - right) * scaleX else left * scaleX
             val mirroredRight = if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA)
                 (imageWidth - left) * scaleX else right * scaleX
+
+            // Log bounding box values
+            Log.d("BoundingBox", "Original Bounding Box: left=$left, top=$top, right=$right, bottom=$bottom")
+            Log.d("BoundingBox", "Mirrored: left=$mirroredLeft, right=$mirroredRight")
+            Log.d("BoundingBox", "Scale: scaleX=$scaleX, scaleY=$scaleY")
+            Log.d("BoundingBox", "OverlayView Size: width=${overlayView.width}, height=${overlayView.height}")
 
             return RectF(mirroredLeft, top * scaleY, mirroredRight, bottom * scaleY)
         }
