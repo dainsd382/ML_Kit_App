@@ -1,16 +1,20 @@
 package com.example.testmlkitandroid
 
 import android.Manifest
+import android.content.ContentValues
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
+import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.YuvImage
 import android.media.Image
 import android.media.Image.Plane
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import android.widget.Button
 import android.widget.Toast
@@ -28,8 +32,6 @@ import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 
@@ -63,6 +65,7 @@ class MeditationActivity : AppCompatActivity() {
             requestCameraPermission()
         }
 
+        // Set up click listener for the start button
         startButton.setOnClickListener {
             showToast("Button clicked")
         }
@@ -142,7 +145,9 @@ class MeditationActivity : AppCompatActivity() {
 
             // Convert Image to Bitmap
             val bitmap = imageToBitmap(mediaImage)
-            val inputImage = InputImage.fromMediaImage(mediaImage, image.imageInfo.rotationDegrees)
+            val rotationDegrees = image.imageInfo.rotationDegrees
+            Log.d("RotationInfo", "Rotation Degrees: $rotationDegrees") // Log rotation information
+            val inputImage = InputImage.fromMediaImage(mediaImage, rotationDegrees)
             val imageWidth = mediaImage.height
             val imageHeight = mediaImage.width
 
@@ -150,6 +155,7 @@ class MeditationActivity : AppCompatActivity() {
                 .addOnSuccessListener { faces ->
                     val currentTime = System.currentTimeMillis()
                     if (faces.isNotEmpty()) {
+                        // Map detected faces to bounding boxes with scaling
                         val boundingBoxes = faces.map { face ->
                             val boundingBox = face.boundingBox
                             calculateBoundingBox(boundingBox, imageWidth, imageHeight)
@@ -194,8 +200,6 @@ class MeditationActivity : AppCompatActivity() {
         }
 
         // Convert Image to Bitmap
-
-
         private fun imageToBitmap(image: Image): Bitmap? {
             val planes: Array<Plane> = image.planes
             val yBuffer: ByteBuffer = planes[0].buffer
@@ -219,29 +223,31 @@ class MeditationActivity : AppCompatActivity() {
             yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 100, out)
             val imageBytes = out.toByteArray()
 
-            return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-        }
+            var bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
 
+            // Rotate Bitmap if needed (e.g., for landscape orientation)
+            val matrix = Matrix()
+            matrix.postRotate(270f) // Rotate by 270 degrees (adjust if needed)
+            bitmap?.let {
+                bitmap = Bitmap.createBitmap(it, 0, 0, it.width, it.height, matrix, true)
+            }
+
+            return bitmap
+        }
 
         // Crop the image based on the bounding box of the detected face
         private fun cropImage(bitmap: Bitmap, boundingBox: Rect): Bitmap? {
-            // Check if the bounding box is valid
-            if (boundingBox.width() <= 0 || boundingBox.height() <= 0) {
-                Log.e("MeditationActivity", "Invalid bounding box dimensions.")
-                return null
-            }
-
-            // Check if the bounding box is within the bitmap dimensions
-            if (boundingBox.left < 0 || boundingBox.top < 0 ||
-                boundingBox.right > bitmap.width || boundingBox.bottom > bitmap.height) {
-                Log.e("MeditationActivity", "Bounding box is out of bitmap bounds.")
-                return null
-            }
+            // Validate and adjust bounding box if necessary
+            val adjustedBox = Rect(
+                boundingBox.left.coerceAtLeast(0),
+                boundingBox.top.coerceAtLeast(0),
+                boundingBox.right.coerceAtMost(bitmap.width),
+                boundingBox.bottom.coerceAtMost(bitmap.height)
+            )
 
             return try {
-                // Crop the bitmap based on the bounding box
-                Bitmap.createBitmap(bitmap, boundingBox.left, boundingBox.top,
-                    boundingBox.width(), boundingBox.height())
+                Bitmap.createBitmap(bitmap, adjustedBox.left, adjustedBox.top,
+                    adjustedBox.width(), adjustedBox.height())
             } catch (e: Exception) {
                 Log.e("MeditationActivity", "Error while cropping image: ${e.message}")
                 null
@@ -251,41 +257,52 @@ class MeditationActivity : AppCompatActivity() {
         // Save the cropped image to the device storage
         private fun saveImageToDevice(bitmap: Bitmap) {
             val filename = "face_${System.currentTimeMillis()}.jpg"
-            val file = File(getExternalFilesDir(null), filename)
 
-            try {
-                FileOutputStream(file).use { outputStream ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
-                    showToast("Image saved to: ${file.absolutePath}")
-                }
-            } catch (e: Exception) {
-                showToast("Error saving image: ${e.message}")
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
+
             }
+
+            val resolver = contentResolver
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+
+            uri?.let {
+                resolver.openOutputStream(it)?.use { outputStream ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
+                    showToast("Image saved to gallery")
+                }
+            } ?: showToast("Error saving image to gallery")
         }
 
         // Calculate the bounding box with scaling for visualization
-        private fun calculateBoundingBox(boundingBox: android.graphics.Rect, imageWidth: Int, imageHeight: Int): RectF {
+        private fun calculateBoundingBox(boundingBox: Rect, imageWidth: Int, imageHeight: Int): RectF {
             val scaleX = overlayView.width.toFloat() / imageWidth
             val scaleY = overlayView.height.toFloat() / imageHeight
 
-            val left = boundingBox.left - boundingBox.width() * expandFactor
-            val top = boundingBox.top + boundingBox.height() * shrinkFactor
-            val right = boundingBox.right + boundingBox.width() * expandFactor
-            val bottom = boundingBox.bottom - boundingBox.height() * shrinkFactor
+            // Expand or shrink bounding box for visualization
+            val left = (boundingBox.left - boundingBox.width() * expandFactor).coerceAtLeast(0F)
+            val top = (boundingBox.top + boundingBox.height() * shrinkFactor).coerceAtLeast(0F)
+            val right = (boundingBox.right + boundingBox.width() * expandFactor).coerceAtMost(imageWidth.toFloat())
+            val bottom = (boundingBox.bottom - boundingBox.height() * shrinkFactor).coerceAtMost(imageHeight.toFloat())
 
+            // Mirror the bounding box for front camera
             val mirroredLeft = if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA)
                 (imageWidth - right) * scaleX else left * scaleX
             val mirroredRight = if (cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA)
                 (imageWidth - left) * scaleX else right * scaleX
 
-            // Log bounding box values
-            Log.d("BoundingBox", "Original Bounding Box: left=$left, top=$top, right=$right, bottom=$bottom")
-            Log.d("BoundingBox", "Mirrored: left=$mirroredLeft, right=$mirroredRight")
-            Log.d("BoundingBox", "Scale: scaleX=$scaleX, scaleY=$scaleY")
-            Log.d("BoundingBox", "OverlayView Size: width=${overlayView.width}, height=${overlayView.height}")
+            val clippedTop = top * scaleY
+            val clippedBottom = bottom * scaleY
 
-            return RectF(mirroredLeft, top * scaleY, mirroredRight, bottom * scaleY)
+            // Log original and scaled bounding box values
+            Log.d("BoundingBox", "Original Bounding Box: left=${boundingBox.left}, top=${boundingBox.top}, right=${boundingBox.right}, bottom=${boundingBox.bottom}")
+            Log.d("BoundingBox", "Scaled Bounding Box: left=$mirroredLeft, top=$clippedTop, right=$mirroredRight, bottom=$clippedBottom")
+
+            return RectF(mirroredLeft, clippedTop, mirroredRight, clippedBottom)
         }
+
     }
 
     override fun onDestroy() {
